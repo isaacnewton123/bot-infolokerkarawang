@@ -168,7 +168,7 @@ if __name__ == "__main__":
     print("====================================================")
     send_telegram_message("🤖 <b>Bot Auto-Apply InfoLoker Karawang Aktif!</b>\n\nBot akan berjalan terus-menerus dan memantau lowongan pekerjaan baru. Anda akan mendapat notifikasi jika ada lamaran yang terkirim.")
     
-    INTERVAL_MENIT = 1
+    INTERVAL_MENIT = 5
     
     # Inisialisasi HTTP Session secara global
     # Ini sangat penting agar jika server CodeIgniter me-regenerate (memperbarui) ID ci_session, 
