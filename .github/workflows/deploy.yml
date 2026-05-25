@@ -1,0 +1,35 @@
+name: Deploy Bot to VPS
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            # Pindah ke folder proyek
+            cd /home/${{ secrets.USERNAME }}/bot-infolokerkarawang
+            
+            # Tarik kode terbaru dari GitHub
+            git pull origin main
+            
+            # Buat/Timpa file .env dari GitHub Secrets (sangat aman)
+            echo "CI_SESSION=${{ secrets.CI_SESSION }}" > .env
+            echo "TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}" >> .env
+            echo "TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID }}" >> .env
+            
+            # Install dependensi baru (jika ada) ke dalam virtual environment
+            /home/${{ secrets.USERNAME }}/bot-infolokerkarawang/.venv/bin/pip install -r requirements.txt
+            
+            # Restart systemd daemon (butuh konfigurasi sudo nopasswd untuk systemctl di VPS)
+            sudo systemctl daemon-reload
+            sudo systemctl restart bot-infoloker

@@ -1,0 +1,16 @@
+# Python Cache
+__pycache__/
+*.pyc
+
+# Environment & Secrets
+.env
+.venv/
+env/
+venv/
+*.key
+*.pub
+
+# Bot Database / State
+applied_jobs.json
+hasil_eksplorasi_web.json
+alur_area_member.json
