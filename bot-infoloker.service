@@ -6,11 +6,10 @@ After=network.target
 Type=simple
 User=ubuntu
 WorkingDirectory=/home/ubuntu/bot-infolokerkarawang
-ExecStart=/home/ubuntu/bot-infolokerkarawang/.venv/bin/python /home/ubuntu/bot-infolokerkarawang/auto_apply.py
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/ubuntu/bot-infolokerkarawang/.venv/bin/python -u /home/ubuntu/bot-infolokerkarawang/auto_apply.py
 Restart=always
 RestartSec=10
-StandardOutput=syslog
-StandardError=syslog
 SyslogIdentifier=bot-infoloker
 
 [Install]
