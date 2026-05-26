@@ -41,24 +41,47 @@ def run_bot(http_session):
     
     # 1. Buka dashboard untuk ambil CSRF
     try:
-        req_dash = http_session.get(f"{BASE_URL}/Dashboard_pelamar", allow_redirects=True)
+        req_dash = http_session.get(f"{BASE_URL}/Dashboard_pelamar", allow_redirects=True, timeout=30)
         
+        # Cek status HTTP untuk deteksi web down
+        if req_dash.status_code != 200:
+            print(f"[x] Web sepertinya down (Status code: {req_dash.status_code}). Akan mencoba lagi nanti.")
+            return True
+            
+        # Cek error database atau maintenance dari konten HTML
+        error_keywords = ['database error', 'maintenance', 'pemeliharaan', 'bad gateway', 'error occurred', 'cloudflare', 'time out']
+        text_lower = req_dash.text.lower()
+        if any(keyword in text_lower for keyword in error_keywords) or len(req_dash.text.strip()) < 500:
+            print("[x] Halaman terindikasi sedang down atau maintenance. Menunggu...")
+            return True
+            
         # Cek apakah kita dilempar ke halaman login (artinya session expired)
-        if 'Login' in req_dash.url:
+        if 'login' in req_dash.url.lower():
             print("[x] Bot dilempar ke halaman Login. Session kedaluwarsa!")
-            send_telegram_message("❌ <b>Bot Terhenti (Session Expired)</b>\n\nci_session Anda sudah kedaluwarsa karena bot dialihkan ke halaman Login. Silakan login manual, ambil `ci_session` baru, lalu perbarui di script.")
+            if not os.path.exists("session_expired.flag"):
+                send_telegram_message("❌ <b>Bot Terhenti (Session Expired)</b>\n\nci_session Anda sudah kedaluwarsa karena bot dialihkan ke halaman Login. Silakan login manual, ambil `ci_session` baru, lalu perbarui di script.")
+                open("session_expired.flag", "w").close()
+            time.sleep(10) # Tunda sedikit agar jika menggunakan PM2/auto-restart tidak ngeloop terlalu cepat
             return False # Hentikan loop
             
         soup = BeautifulSoup(req_dash.text, 'html.parser')
         csrf_input = soup.find('input', {'name': 'ini_csrf'})
         if not csrf_input:
             print("[x] Gagal mengambil CSRF Token. Session mungkin kedaluwarsa.")
-            send_telegram_message("❌ <b>Bot Gagal Berjalan (Session Expired)</b>\n\nci_session Anda sepertinya sudah kedaluwarsa. Silakan perbarui cookie di script `auto_apply.py`.")
+            if not os.path.exists("session_expired.flag"):
+                send_telegram_message("❌ <b>Bot Gagal Berjalan (Session Expired)</b>\n\nci_session Anda sepertinya sudah kedaluwarsa. Silakan perbarui cookie di script `auto_apply.py`.")
+                open("session_expired.flag", "w").close()
+            time.sleep(10) # Tunda sedikit agar PM2 tidak spam
             return False # Return false untuk menghentikan loop
+            
         csrf_token = csrf_input['value']
+        
+        # Jika berhasil masuk dashboard, hapus flag error agar notif berfungsi normal lagi nantinya
+        if os.path.exists("session_expired.flag"):
+            os.remove("session_expired.flag")
     except Exception as e:
-        print(f"[x] Error saat membuka dashboard: {e}")
-        send_telegram_message(f"⚠️ <b>Peringatan:</b> Bot gagal membuka halaman dashboard InfoLoker. Server mungkin sedang gangguan.\n\nError: {e}")
+        print(f"[x] Error koneksi saat membuka dashboard: {e}")
+        # Tidak mengirim notif telegram agar tidak spam saat server sedang down / gangguan jaringan
         return True # Return true agar tetap mencoba lagi di interval berikutnya
         
     # 2. Ambil data lowongan dari DataTables
@@ -87,7 +110,7 @@ def run_bot(http_session):
         print(f"[*] Ditemukan {len(new_jobs)} lowongan di halaman.")
     except Exception as e:
         print(f"[x] Error saat menarik lowongan: {e}")
-        send_telegram_message(f"⚠️ <b>Peringatan:</b> Bot gagal menarik data lowongan dari server InfoLoker.\n\nError: {e}")
+        # Tidak mengirim notif telegram agar tidak spam
         return True
     
     if len(new_jobs) == 0:
