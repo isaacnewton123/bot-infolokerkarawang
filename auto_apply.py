@@ -4,8 +4,9 @@ import re
 import time
 import os
 import json
+import threading
 from dotenv import load_dotenv
-from telegram_notifier import send_telegram_message
+from telegram_notifier import send_telegram_message, start_command_listener
 
 # Muat variabel dari .env
 load_dotenv()
@@ -49,7 +50,7 @@ def run_bot(http_session):
             return True
             
         # Cek error database atau maintenance dari konten HTML
-        error_keywords = ['database error', 'maintenance', 'pemeliharaan', 'bad gateway', 'error occurred', 'cloudflare', 'time out']
+        error_keywords = ['a database error occurred', '502 bad gateway', '504 gateway time-out', '503 service temporarily unavailable', 'under maintenance']
         text_lower = req_dash.text.lower()
         if any(keyword in text_lower for keyword in error_keywords) or len(req_dash.text.strip()) < 500:
             print("[x] Halaman terindikasi sedang down atau maintenance. Menunggu...")
@@ -201,7 +202,15 @@ if __name__ == "__main__":
     # Set cookie secara eksplisit dengan domain agar tidak bentrok dengan cookie baru dari server
     global_session.cookies.set('ci_session', COOKIE['ci_session'], domain='infoloker.karawangkab.go.id')
     
+    # Jalankan Telegram Listener di background
+    threading.Thread(target=start_command_listener, daemon=True).start()
+    
     while True:
+        if os.path.exists("stop.flag"):
+            # Jika ada perintah /stop dari telegram, bot akan idle/tidur
+            time.sleep(10)
+            continue
+            
         status_ok = run_bot(global_session)
         if not status_ok:
             print("[!] Bot dihentikan karena session expired atau error kritikal.")
