@@ -7,10 +7,14 @@ __pycache__/
 .venv/
 env/
 venv/
+
+# Bot Runtime Files
+applied_jobs.json
+bot.log
+*.flag
+
+# Old Files (deprecated)
 *.key
 *.pub
-
-# Bot Database / State
-applied_jobs.json
 hasil_eksplorasi_web.json
 alur_area_member.json

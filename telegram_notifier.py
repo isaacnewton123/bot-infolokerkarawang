@@ -12,6 +12,10 @@ load_dotenv()
 BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
+# Path log file untuk Termux (bukan systemd/journalctl)
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+LOG_FILE = os.path.join(SCRIPT_DIR, 'bot.log')
+
 def send_telegram_message(message, reply_markup=None):
     """
     Mengirimkan pesan ke akun Telegram menggunakan Bot API.
@@ -64,17 +68,38 @@ def get_telegram_updates(offset=None):
 def set_bot_commands():
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/setMyCommands"
     commands = [
-        {"command": "status", "description": "Mengecek kondisi bot"},
-        {"command": "log", "description": "Melihat log terbaru"},
-        {"command": "stop", "description": "Menjeda pencarian"},
-        {"command": "start", "description": "Melanjutkan pencarian"},
-        {"command": "update", "description": "Menarik update kode"},
-        {"command": "restart", "description": "Restart bot"}
+        {"command": "status", "description": "📊 Cek kondisi bot"},
+        {"command": "log", "description": "📋 Lihat log terbaru"},
+        {"command": "stop", "description": "⏸ Jeda pencarian"},
+        {"command": "start", "description": "▶️ Lanjutkan pencarian"},
+        {"command": "update", "description": "🔄 Tarik update GitHub"},
+        {"command": "restart", "description": "🔁 Restart bot"}
     ]
     try:
         requests.post(url, json={"commands": commands}, timeout=10)
     except:
         pass
+
+def _get_bot_uptime():
+    """Hitung uptime bot berdasarkan PID process Python saat ini."""
+    try:
+        pid = os.getpid()
+        # Coba pakai /proc (Linux/Termux)
+        stat_file = f"/proc/{pid}/stat"
+        if os.path.exists(stat_file):
+            boot_time = os.path.getctime(f"/proc/{pid}")
+            uptime_sec = int(time.time() - boot_time)
+            jam, sisa = divmod(uptime_sec, 3600)
+            menit, detik = divmod(sisa, 60)
+            if jam > 0:
+                return f"{jam}j {menit}m {detik}d"
+            elif menit > 0:
+                return f"{menit}m {detik}d"
+            else:
+                return f"{detik} detik"
+    except:
+        pass
+    return "N/A"
 
 def start_command_listener():
     print("[*] Telegram Command Listener mulai berjalan...")
@@ -115,67 +140,124 @@ def start_command_listener():
             print(f"[Telegram] Menerima perintah: {text}")
                 
             if text == "/help":
-                msg = ("🤖 <b>Daftar Perintah Bot InfoLoker:</b>\n\n"
-                       "Gunakan tombol di bawah, atau ketik perintah:\n"
-                       "/status - Mengecek apakah bot berjalan normal\n"
-                       "/log - Melihat log/catatan aktivitas bot terakhir\n"
-                       "/stop - Menghentikan sementara pencarian loker\n"
-                       "/start - Melanjutkan pencarian loker\n"
-                       "/restart - Memulai ulang (restart) script bot\n"
-                       "/update - Menarik pembaruan kode terbaru dari GitHub")
+                msg = ("━━━━━━━━━━━━━━━━━━━━\n"
+                       "📖 <b>Daftar Perintah</b>\n"
+                       "━━━━━━━━━━━━━━━━━━━━\n\n"
+                       "📊 /status — Cek kondisi bot\n"
+                       "📋 /log — Lihat log aktivitas terbaru\n"
+                       "⏸ /stop — Jeda pencarian loker\n"
+                       "▶️ /start — Lanjutkan pencarian\n"
+                       "🔄 /update — Tarik update dari GitHub\n"
+                       "🔁 /restart — Restart bot\n\n"
+                       "<i>Gunakan tombol di bawah untuk akses cepat.</i>")
                 send_telegram_message(msg, reply_markup=main_keyboard)
                 
             elif text == "/status":
-                send_telegram_message("🔍 Mengambil status systemd...", reply_markup=main_keyboard)
+                uptime = _get_bot_uptime()
+                is_paused = os.path.exists("stop.flag")
+                status_emoji = "⏸" if is_paused else "🟢"
+                status_text = "Dijeda" if is_paused else "Aktif"
+                
+                # Cek proses berjalan via ps (Termux-compatible)
                 try:
-                    result = subprocess.run(["systemctl", "status", "bot-infoloker", "--no-pager"], capture_output=True, text=True)
-                    out = result.stdout.strip()
-                    if not out:
-                        out = result.stderr.strip()
-                    send_telegram_message(f"🖥️ <b>Systemd Status:</b>\n<pre>{out[:3000]}</pre>", reply_markup=main_keyboard)
-                except Exception as e:
-                    send_telegram_message(f"❌ Gagal mengambil status: {e}", reply_markup=main_keyboard)
+                    result = subprocess.run(
+                        ["ps", "aux"], capture_output=True, text=True
+                    )
+                    # Fallback untuk Termux yang mungkin tidak support 'aux'
+                    if result.returncode != 0:
+                        result = subprocess.run(
+                            ["ps", "-ef"], capture_output=True, text=True
+                        )
+                    bot_procs = [l for l in result.stdout.splitlines() if 'auto_apply' in l and 'grep' not in l]
+                    proc_count = len(bot_procs)
+                except:
+                    proc_count = 1  # Jika ps gagal, anggap berjalan (karena command listener aktif)
+                
+                msg = ("━━━━━━━━━━━━━━━━━━━━\n"
+                       f"{status_emoji} <b>Status Bot</b>\n"
+                       "━━━━━━━━━━━━━━━━━━━━\n\n"
+                       f"<b>Status:</b> {status_text}\n"
+                       f"<b>Uptime:</b> {uptime}\n"
+                       f"<b>Proses:</b> {proc_count} aktif\n"
+                       f"<b>Platform:</b> Termux\n"
+                       f"<b>PID:</b> <code>{os.getpid()}</code>")
+                send_telegram_message(msg, reply_markup=main_keyboard)
                     
             elif text == "/log":
-                send_telegram_message("🔍 Menarik log sistem terbaru...")
+                # Baca log dari file (bukan journalctl)
                 try:
-                    # Mengambil 15 baris terakhir dari log systemd
-                    result = subprocess.run(["journalctl", "-u", "bot-infoloker", "-n", "15", "--no-pager"], capture_output=True, text=True)
-                    out = result.stdout.strip()
-                    if out:
-                        send_telegram_message(f"📋 <b>Log Terbaru:</b>\n<pre>{out[-3000:]}</pre>", reply_markup=main_keyboard)
+                    if os.path.exists(LOG_FILE):
+                        with open(LOG_FILE, 'r') as f:
+                            lines = f.readlines()
+                        # Ambil 25 baris terakhir
+                        last_lines = lines[-25:] if len(lines) > 25 else lines
+                        out = ''.join(last_lines).strip()
+                        if out:
+                            # Potong jika terlalu panjang untuk Telegram
+                            if len(out) > 3500:
+                                out = out[-3500:]
+                            msg = ("━━━━━━━━━━━━━━━━━━━━\n"
+                                   "📋 <b>Log Terbaru</b>\n"
+                                   "━━━━━━━━━━━━━━━━━━━━\n\n"
+                                   f"<pre>{out}</pre>")
+                            send_telegram_message(msg, reply_markup=main_keyboard)
+                        else:
+                            send_telegram_message("📋 Log kosong.", reply_markup=main_keyboard)
                     else:
-                        send_telegram_message("📋 Log kosong atau bot tidak dijalankan via systemd.", reply_markup=main_keyboard)
+                        send_telegram_message("📋 File log belum ada. Bot mungkin baru dijalankan.", reply_markup=main_keyboard)
                 except Exception as e:
-                    send_telegram_message(f"❌ Gagal mengambil log: {e}", reply_markup=main_keyboard)
+                    send_telegram_message(f"❌ Gagal membaca log: {e}", reply_markup=main_keyboard)
                     
             elif text == "/stop":
                 if not os.path.exists("stop.flag"):
                     open("stop.flag", "w").close()
-                send_telegram_message("🔴 Bot berhasil dijeda. Tidak ada pengecekan lowongan baru hingga Anda menekan /start.", reply_markup=main_keyboard)
+                msg = ("━━━━━━━━━━━━━━━━━━━━\n"
+                       "⏸ <b>Bot Dijeda</b>\n"
+                       "━━━━━━━━━━━━━━━━━━━━\n\n"
+                       "Bot tidak akan mengecek lowongan baru sampai Anda mengirim /start.")
+                send_telegram_message(msg, reply_markup=main_keyboard)
                 
             elif text == "/start":
                 if os.path.exists("stop.flag"):
                     os.remove("stop.flag")
-                send_telegram_message("🟢 Bot dilanjutkan! Kembali mencari lowongan pekerjaan...", reply_markup=main_keyboard)
+                msg = ("━━━━━━━━━━━━━━━━━━━━\n"
+                       "▶️ <b>Bot Dilanjutkan</b>\n"
+                       "━━━━━━━━━━━━━━━━━━━━\n\n"
+                       "Kembali memantau lowongan pekerjaan baru!")
+                send_telegram_message(msg, reply_markup=main_keyboard)
                 
             elif text == "/restart":
-                send_telegram_message("🔄 Me-restart bot... (Jika pakai PM2/systemd, bot akan otomatis nyala lagi)", reply_markup=main_keyboard)
+                msg = ("━━━━━━━━━━━━━━━━━━━━\n"
+                       "🔁 <b>Restart Bot</b>\n"
+                       "━━━━━━━━━━━━━━━━━━━━\n\n"
+                       "Bot sedang di-restart...\n"
+                       "Jalankan ulang secara manual di Termux jika tidak otomatis.")
+                send_telegram_message(msg, reply_markup=main_keyboard)
                 os._exit(1)
                 
             elif text == "/update":
-                send_telegram_message("⏳ Sedang menarik update dari GitHub...")
+                msg = ("━━━━━━━━━━━━━━━━━━━━\n"
+                       "🔄 <b>Update Kode</b>\n"
+                       "━━━━━━━━━━━━━━━━━━━━\n\n"
+                       "Sedang menarik update dari GitHub...")
+                send_telegram_message(msg)
                 try:
-                    result = subprocess.run(["git", "pull"], capture_output=True, text=True, cwd=os.path.dirname(os.path.abspath(__file__)))
+                    result = subprocess.run(["git", "pull"], capture_output=True, text=True, cwd=SCRIPT_DIR)
                     out = result.stdout.strip()
                     if "Already up to date" in out:
                         send_telegram_message("✅ Kode bot sudah versi paling baru.", reply_markup=main_keyboard)
                     else:
-                        send_telegram_message(f"✅ Update berhasil ditarik!\n<pre>{out[:500]}</pre>\n\nBot akan otomatis restart sekarang...", reply_markup=main_keyboard)
+                        msg = (f"✅ <b>Update berhasil!</b>\n\n"
+                               f"<pre>{out[:500]}</pre>\n\n"
+                               "Bot akan restart sekarang...")
+                        send_telegram_message(msg, reply_markup=main_keyboard)
                         os._exit(1)
                 except Exception as e:
                     send_telegram_message(f"❌ Gagal update: {e}", reply_markup=main_keyboard)
             else:
-                send_telegram_message("❓ Perintah tidak dikenali. Ketik /help untuk melihat daftar perintah atau gunakan tombol di bawah.", reply_markup=main_keyboard)
+                msg = ("❓ Perintah tidak dikenali.\n\n"
+                       "Ketik /help untuk melihat daftar perintah,\n"
+                       "atau gunakan tombol di bawah.")
+                send_telegram_message(msg, reply_markup=main_keyboard)
                 
         time.sleep(1)
