@@ -54,7 +54,7 @@ pkg update && pkg upgrade -y
 pkg install python git -y
 
 # Clone repositori
-git clone https://github.com/USERNAME/bot-infolokerkarawang.git
+git clone https://github.com/isaacnewton123/bot-infolokerkarawang.git
 cd bot-infolokerkarawang
 
 # Buat virtual environment
@@ -112,7 +112,7 @@ nohup python auto_apply.py > /dev/null 2>&1 &
 sudo apt update && sudo apt install -y python3 python3-venv git
 
 # Clone repositori
-git clone https://github.com/USERNAME/bot-infolokerkarawang.git
+git clone https://github.com/isaacnewton123/bot-infolokerkarawang.git
 cd bot-infolokerkarawang
 
 # Buat virtual environment
@@ -172,7 +172,7 @@ nohup python3 auto_apply.py > /dev/null 2>&1 &
 
 ```powershell
 # Clone repositori
-git clone https://github.com/USERNAME/bot-infolokerkarawang.git
+git clone https://github.com/isaacnewton123/bot-infolokerkarawang.git
 cd bot-infolokerkarawang
 
 # Buat virtual environment
