@@ -1,5 +1,6 @@
 import requests
 import os
+import re
 import time
 import subprocess
 import sys
@@ -12,9 +13,10 @@ load_dotenv()
 BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
-# Path log file untuk Termux (bukan systemd/journalctl)
+# Path file
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_FILE = os.path.join(SCRIPT_DIR, 'bot.log')
+ENV_FILE = os.path.join(SCRIPT_DIR, '.env')
 
 def send_telegram_message(message, reply_markup=None):
     """
@@ -33,26 +35,23 @@ def send_telegram_message(message, reply_markup=None):
     try:
         response = requests.post(url, json=payload, timeout=10)
         if response.status_code == 200:
-            print("[✓] Notifikasi Telegram berhasil terkirim!")
             return True
         else:
-            print(f"[x] Gagal mengirim Telegram. Status: {response.status_code}")
-            print(response.text)
+            print(f"Gagal kirim notif Telegram (HTTP {response.status_code})")
             return False
     except Exception as e:
-        print(f"[x] Error koneksi Telegram: {e}")
+        print(f"Koneksi Telegram bermasalah: {e}")
         return False
 
 if __name__ == "__main__":
-    # Test pengiriman pesan
-    print("Mencoba mengirim pesan uji coba ke Telegram Anda...")
-    sukses = send_telegram_message("🤖 <b>TEST BOT INFOLOKER</b>\n\nHalo bos! Bot auto-apply sudah berhasil terhubung dengan Telegram Anda. Siap mencari kerja!")
+    print("Mengirim pesan uji coba ke Telegram...")
+    sukses = send_telegram_message("🤖 <b>TEST BOT INFOLOKER</b>\n\nHalo bos! Bot sudah terhubung dengan Telegram Anda. Siap berburu loker!")
     if sukses:
-        print("Silakan cek HP Anda, pesan seharusnya sudah masuk.")
+        print("Pesan terkirim! Cek HP Anda.")
         
 def get_telegram_updates(offset=None):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
-    params = {"timeout": 30} # long polling for 30 seconds
+    params = {"timeout": 30}
     if offset:
         params["offset"] = offset
         
@@ -60,8 +59,7 @@ def get_telegram_updates(offset=None):
         response = requests.get(url, params=params, timeout=35)
         if response.status_code == 200:
             return response.json().get("result", [])
-    except Exception as e:
-        # print(f"[x] Error getUpdates Telegram: {e}")
+    except:
         pass
     return []
 
@@ -69,7 +67,8 @@ def set_bot_commands():
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/setMyCommands"
     commands = [
         {"command": "status", "description": "📊 Cek kondisi bot"},
-        {"command": "log", "description": "📋 Lihat log terbaru"},
+        {"command": "log", "description": "📋 Lihat aktivitas terbaru"},
+        {"command": "session", "description": "🔑 Ganti ci_session"},
         {"command": "stop", "description": "⏸ Jeda pencarian"},
         {"command": "start", "description": "▶️ Lanjutkan pencarian"},
         {"command": "update", "description": "🔄 Tarik update GitHub"},
@@ -81,38 +80,112 @@ def set_bot_commands():
         pass
 
 def _get_bot_uptime():
-    """Hitung uptime bot berdasarkan PID process Python saat ini."""
+    """Hitung uptime bot."""
     try:
         pid = os.getpid()
-        # Coba pakai /proc (Linux/Termux)
         stat_file = f"/proc/{pid}/stat"
         if os.path.exists(stat_file):
             boot_time = os.path.getctime(f"/proc/{pid}")
             uptime_sec = int(time.time() - boot_time)
-            jam, sisa = divmod(uptime_sec, 3600)
+            hari, sisa = divmod(uptime_sec, 86400)
+            jam, sisa = divmod(sisa, 3600)
             menit, detik = divmod(sisa, 60)
-            if jam > 0:
-                return f"{jam}j {menit}m {detik}d"
+            if hari > 0:
+                return f"{hari} hari {jam} jam {menit} menit"
+            elif jam > 0:
+                return f"{jam} jam {menit} menit"
             elif menit > 0:
-                return f"{menit}m {detik}d"
+                return f"{menit} menit {detik} detik"
             else:
                 return f"{detik} detik"
     except:
         pass
-    return "N/A"
+    return "Tidak diketahui"
+
+def _update_env_session(new_session):
+    """
+    Update CI_SESSION di file .env secara langsung.
+    Return True jika berhasil.
+    """
+    try:
+        if os.path.exists(ENV_FILE):
+            with open(ENV_FILE, 'r') as f:
+                content = f.read()
+            
+            # Replace CI_SESSION value
+            if 'CI_SESSION=' in content:
+                content = re.sub(r'CI_SESSION=.*', f'CI_SESSION={new_session}', content)
+            else:
+                content += f'\nCI_SESSION={new_session}\n'
+            
+            with open(ENV_FILE, 'w') as f:
+                f.write(content)
+            return True
+        else:
+            # Buat file .env baru
+            with open(ENV_FILE, 'w') as f:
+                f.write(f'CI_SESSION={new_session}\n')
+            return True
+    except Exception as e:
+        print(f"Gagal update .env: {e}")
+        return False
+
+def _format_log_human(raw_lines):
+    """
+    Konversi log mentah ke format yang lebih enak dibaca manusia.
+    """
+    formatted = []
+    for line in raw_lines:
+        line = line.strip()
+        if not line:
+            continue
+        
+        # Hapus timestamp prefix [2026-09-22 21:29:47] 
+        clean = re.sub(r'^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\]\s*', '', line)
+        
+        # Skip baris separator atau baris kosong
+        if clean.startswith('===') or clean.startswith('---') or not clean:
+            continue
+        
+        # Beri emoji berdasarkan isi
+        if 'Berhasil melamar' in clean or '✅' in clean:
+            formatted.append(f"✅ {clean}")
+        elif 'Gagal' in clean or '❌' in clean:
+            formatted.append(f"❌ {clean}")
+        elif 'Memulai pengecekan' in clean:
+            formatted.append(f"🔍 {clean}")
+        elif 'lowongan ditemukan' in clean or 'Total:' in clean:
+            formatted.append(f"📋 {clean}")
+        elif 'Menunggu' in clean:
+            formatted.append(f"⏳ {clean}")
+        elif 'LOWONGAN BARU' in clean:
+            formatted.append(f"🆕 {clean}")
+        elif 'Melamar' in clean:
+            formatted.append(f"📨 {clean}")
+        elif 'Inisialisasi' in clean:
+            formatted.append(f"⚙️ {clean}")
+        elif 'Bot dihentikan' in clean or 'session expired' in clean.lower():
+            formatted.append(f"🛑 {clean}")
+        elif 'BOT AUTO-APPLY' in clean or 'Platform' in clean:
+            formatted.append(f"🤖 {clean}")
+        else:
+            formatted.append(f"  {clean}")
+    
+    return '\n'.join(formatted) if formatted else "Belum ada aktivitas."
+
+# State: menunggu input ci_session dari user
+_waiting_session = {}
 
 def start_command_listener():
-    print("[*] Telegram Command Listener mulai berjalan...")
+    print("Telegram listener aktif...")
     
-    # Daftarkan menu command bawaan Telegram
     set_bot_commands()
     
-    # Buat tombol keyboard permanen
     main_keyboard = {
         "keyboard": [
             [{"text": "/status"}, {"text": "/log"}],
-            [{"text": "/start"}, {"text": "/stop"}],
-            [{"text": "/update"}, {"text": "/restart"}]
+            [{"text": "/session"}, {"text": "/stop"}],
+            [{"text": "/start"}, {"text": "/restart"}]
         ],
         "resize_keyboard": True
     }
@@ -132,19 +205,57 @@ def start_command_listener():
             chat_id_from = str(message["chat"]["id"])
             text = message["text"].strip()
             
-            # Verifikasi keamanan (hanya memproses dari CHAT_ID pemilik)
             if chat_id_from != CHAT_ID:
-                print(f"[!] Akses ditolak dari chat id: {chat_id_from}")
                 continue
+            
+            # Cek apakah sedang menunggu input ci_session
+            if _waiting_session.get(chat_id_from):
+                _waiting_session[chat_id_from] = False
+                new_session = text.strip()
                 
-            print(f"[Telegram] Menerima perintah: {text}")
+                # Validasi dasar (ci_session biasanya 26-40 karakter alfanumerik)
+                if len(new_session) < 20 or ' ' in new_session:
+                    msg = ("━━━━━━━━━━━━━━━━━━━━\n"
+                           "❌ <b>Session Tidak Valid</b>\n"
+                           "━━━━━━━━━━━━━━━━━━━━\n\n"
+                           "Format ci_session tidak sesuai.\n"
+                           "Pastikan Anda meng-copy nilai cookie\n"
+                           "yang benar dari browser.\n\n"
+                           "Coba lagi dengan /session")
+                    send_telegram_message(msg, reply_markup=main_keyboard)
+                    continue
+                
+                # Update .env
+                if _update_env_session(new_session):
+                    msg = ("━━━━━━━━━━━━━━━━━━━━\n"
+                           "✅ <b>Session Diperbarui!</b>\n"
+                           "━━━━━━━━━━━━━━━━━━━━\n\n"
+                           f"Cookie baru: <code>{new_session[:8]}...{new_session[-4:]}</code>\n\n"
+                           "Bot akan restart otomatis dengan\n"
+                           "session yang baru. Tunggu sebentar ya...")
+                    send_telegram_message(msg, reply_markup=main_keyboard)
+                    time.sleep(1)
+                    
+                    # Restart bot dengan session baru
+                    python = sys.executable
+                    script = os.path.join(SCRIPT_DIR, 'auto_apply.py')
+                    os.execv(python, [python, script])
+                else:
+                    msg = ("━━━━━━━━━━━━━━━━━━━━\n"
+                           "❌ <b>Gagal Update</b>\n"
+                           "━━━━━━━━━━━━━━━━━━━━\n\n"
+                           "Tidak bisa menulis ke file .env.\n"
+                           "Coba update secara manual.")
+                    send_telegram_message(msg, reply_markup=main_keyboard)
+                continue
                 
             if text == "/help":
                 msg = ("━━━━━━━━━━━━━━━━━━━━\n"
                        "📖 <b>Daftar Perintah</b>\n"
                        "━━━━━━━━━━━━━━━━━━━━\n\n"
                        "📊 /status — Cek kondisi bot\n"
-                       "📋 /log — Lihat log aktivitas terbaru\n"
+                       "📋 /log — Lihat aktivitas terbaru\n"
+                       "🔑 /session — Ganti cookie ci_session\n"
                        "⏸ /stop — Jeda pencarian loker\n"
                        "▶️ /start — Lanjutkan pencarian\n"
                        "🔄 /update — Tarik update dari GitHub\n"
@@ -156,57 +267,66 @@ def start_command_listener():
                 uptime = _get_bot_uptime()
                 is_paused = os.path.exists("stop.flag")
                 status_emoji = "⏸" if is_paused else "🟢"
-                status_text = "Dijeda" if is_paused else "Aktif"
+                status_text = "Dijeda (ketik /start)" if is_paused else "Aktif & Memantau"
                 
-                # Cek proses berjalan via ps (Termux-compatible)
+                # Hitung jumlah lowongan yang sudah diproses
                 try:
-                    result = subprocess.run(
-                        ["ps", "aux"], capture_output=True, text=True
-                    )
-                    # Fallback untuk Termux yang mungkin tidak support 'aux'
-                    if result.returncode != 0:
-                        result = subprocess.run(
-                            ["ps", "-ef"], capture_output=True, text=True
-                        )
-                    bot_procs = [l for l in result.stdout.splitlines() if 'auto_apply' in l and 'grep' not in l]
-                    proc_count = len(bot_procs)
+                    import json
+                    with open(os.path.join(SCRIPT_DIR, 'applied_jobs.json'), 'r') as f:
+                        total_tracked = len(json.load(f))
                 except:
-                    proc_count = 1  # Jika ps gagal, anggap berjalan (karena command listener aktif)
+                    total_tracked = 0
                 
                 msg = ("━━━━━━━━━━━━━━━━━━━━\n"
                        f"{status_emoji} <b>Status Bot</b>\n"
                        "━━━━━━━━━━━━━━━━━━━━\n\n"
-                       f"<b>Status:</b> {status_text}\n"
-                       f"<b>Uptime:</b> {uptime}\n"
-                       f"<b>Proses:</b> {proc_count} aktif\n"
-                       f"<b>Platform:</b> Termux\n"
-                       f"<b>PID:</b> <code>{os.getpid()}</code>")
+                       f"<b>Kondisi:</b> {status_text}\n"
+                       f"<b>Sudah jalan:</b> {uptime}\n"
+                       f"<b>Lowongan dipantau:</b> {total_tracked}\n\n"
+                       "<i>Bot mengecek lowongan baru\n"
+                       "setiap 5 menit secara otomatis.</i>")
                 send_telegram_message(msg, reply_markup=main_keyboard)
                     
             elif text == "/log":
-                # Baca log dari file (bukan journalctl)
                 try:
                     if os.path.exists(LOG_FILE):
                         with open(LOG_FILE, 'r') as f:
                             lines = f.readlines()
-                        # Ambil 25 baris terakhir
-                        last_lines = lines[-25:] if len(lines) > 25 else lines
-                        out = ''.join(last_lines).strip()
-                        if out:
-                            # Potong jika terlalu panjang untuk Telegram
-                            if len(out) > 3500:
-                                out = out[-3500:]
-                            msg = ("━━━━━━━━━━━━━━━━━━━━\n"
-                                   "📋 <b>Log Terbaru</b>\n"
-                                   "━━━━━━━━━━━━━━━━━━━━\n\n"
-                                   f"<pre>{out}</pre>")
-                            send_telegram_message(msg, reply_markup=main_keyboard)
-                        else:
-                            send_telegram_message("📋 Log kosong.", reply_markup=main_keyboard)
+                        
+                        last_lines = lines[-20:] if len(lines) > 20 else lines
+                        human_log = _format_log_human(last_lines)
+                        
+                        if len(human_log) > 3500:
+                            human_log = human_log[-3500:]
+                        
+                        msg = ("━━━━━━━━━━━━━━━━━━━━\n"
+                               "📋 <b>Aktivitas Terakhir</b>\n"
+                               "━━━━━━━━━━━━━━━━━━━━\n\n"
+                               f"{human_log}")
+                        send_telegram_message(msg, reply_markup=main_keyboard)
                     else:
-                        send_telegram_message("📋 File log belum ada. Bot mungkin baru dijalankan.", reply_markup=main_keyboard)
+                        msg = ("━━━━━━━━━━━━━━━━━━━━\n"
+                               "📋 <b>Aktivitas</b>\n"
+                               "━━━━━━━━━━━━━━━━━━━━\n\n"
+                               "Belum ada aktivitas.\n"
+                               "Bot mungkin baru saja dijalankan.")
+                        send_telegram_message(msg, reply_markup=main_keyboard)
                 except Exception as e:
                     send_telegram_message(f"❌ Gagal membaca log: {e}", reply_markup=main_keyboard)
+                    
+            elif text == "/session":
+                _waiting_session[chat_id_from] = True
+                msg = ("━━━━━━━━━━━━━━━━━━━━\n"
+                       "🔑 <b>Ganti Session</b>\n"
+                       "━━━━━━━━━━━━━━━━━━━━\n\n"
+                       "Kirimkan cookie <code>ci_session</code> yang baru.\n\n"
+                       "<b>Cara mendapatkan:</b>\n"
+                       "1. Login di browser\n"
+                       "2. Tekan F12 → Application → Cookies\n"
+                       "3. Copy nilai <code>ci_session</code>\n"
+                       "4. Paste & kirim di sini\n\n"
+                       "<i>⏳ Menunggu input Anda...</i>")
+                send_telegram_message(msg, reply_markup=main_keyboard)
                     
             elif text == "/stop":
                 if not os.path.exists("stop.flag"):
@@ -214,7 +334,8 @@ def start_command_listener():
                 msg = ("━━━━━━━━━━━━━━━━━━━━\n"
                        "⏸ <b>Bot Dijeda</b>\n"
                        "━━━━━━━━━━━━━━━━━━━━\n\n"
-                       "Bot tidak akan mengecek lowongan baru sampai Anda mengirim /start.")
+                       "Pencarian lowongan dihentikan sementara.\n"
+                       "Ketik /start untuk melanjutkan.")
                 send_telegram_message(msg, reply_markup=main_keyboard)
                 
             elif text == "/start":
@@ -223,7 +344,7 @@ def start_command_listener():
                 msg = ("━━━━━━━━━━━━━━━━━━━━\n"
                        "▶️ <b>Bot Dilanjutkan</b>\n"
                        "━━━━━━━━━━━━━━━━━━━━\n\n"
-                       "Kembali memantau lowongan pekerjaan baru!")
+                       "Kembali berburu lowongan pekerjaan baru! 🎯")
                 send_telegram_message(msg, reply_markup=main_keyboard)
                 
             elif text == "/restart":
@@ -231,9 +352,15 @@ def start_command_listener():
                        "🔁 <b>Restart Bot</b>\n"
                        "━━━━━━━━━━━━━━━━━━━━\n\n"
                        "Bot sedang di-restart...\n"
-                       "Jalankan ulang secara manual di Termux jika tidak otomatis.")
+                       "Tunggu beberapa detik ya.")
                 send_telegram_message(msg, reply_markup=main_keyboard)
-                os._exit(1)
+                time.sleep(1)
+                
+                # Restart dengan os.execv — replace process saat ini
+                # dengan proses baru tanpa exit loop
+                python = sys.executable
+                script = os.path.join(SCRIPT_DIR, 'auto_apply.py')
+                os.execv(python, [python, script])
                 
             elif text == "/update":
                 msg = ("━━━━━━━━━━━━━━━━━━━━\n"
@@ -245,17 +372,27 @@ def start_command_listener():
                     result = subprocess.run(["git", "pull"], capture_output=True, text=True, cwd=SCRIPT_DIR)
                     out = result.stdout.strip()
                     if "Already up to date" in out:
-                        send_telegram_message("✅ Kode bot sudah versi paling baru.", reply_markup=main_keyboard)
+                        msg = ("━━━━━━━━━━━━━━━━━━━━\n"
+                               "✅ <b>Sudah Terbaru</b>\n"
+                               "━━━━━━━━━━━━━━━━━━━━\n\n"
+                               "Kode bot sudah versi paling baru.\n"
+                               "Tidak ada perubahan.")
+                        send_telegram_message(msg, reply_markup=main_keyboard)
                     else:
-                        msg = (f"✅ <b>Update berhasil!</b>\n\n"
-                               f"<pre>{out[:500]}</pre>\n\n"
+                        msg = ("━━━━━━━━━━━━━━━━━━━━\n"
+                               "✅ <b>Update Berhasil!</b>\n"
+                               "━━━━━━━━━━━━━━━━━━━━\n\n"
+                               "Kode terbaru berhasil ditarik.\n"
                                "Bot akan restart sekarang...")
                         send_telegram_message(msg, reply_markup=main_keyboard)
-                        os._exit(1)
+                        time.sleep(1)
+                        python = sys.executable
+                        script = os.path.join(SCRIPT_DIR, 'auto_apply.py')
+                        os.execv(python, [python, script])
                 except Exception as e:
                     send_telegram_message(f"❌ Gagal update: {e}", reply_markup=main_keyboard)
             else:
-                msg = ("❓ Perintah tidak dikenali.\n\n"
+                msg = ("Perintah tidak dikenali 🤔\n\n"
                        "Ketik /help untuk melihat daftar perintah,\n"
                        "atau gunakan tombol di bawah.")
                 send_telegram_message(msg, reply_markup=main_keyboard)

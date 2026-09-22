@@ -101,14 +101,14 @@ def get_csrf_token(http_session):
         if 'login' in req_dash.url.lower():
             if not os.path.exists("session_expired.flag"):
                 msg = ("━━━━━━━━━━━━━━━━━━━━\n"
-                       "❌ <b>Session Expired</b>\n"
+                       "❌ <b>Session Habis</b>\n"
                        "━━━━━━━━━━━━━━━━━━━━\n\n"
-                       "ci_session sudah kedaluwarsa.\n\n"
-                       "<b>Langkah:</b>\n"
-                       "1. Login manual di website\n"
-                       "2. Ambil <code>ci_session</code> baru\n"
-                       "3. Update file <code>.env</code>\n"
-                       "4. Restart bot")
+                       "Cookie ci_session sudah kedaluwarsa.\n"
+                       "Bot tidak bisa login ke website.\n\n"
+                       "<b>Cara memperbaiki:</b>\n"
+                       "Ketik /session lalu kirimkan\n"
+                       "cookie ci_session yang baru.\n\n"
+                       "<i>Atau update manual di file .env</i>")
                 send_telegram_message(msg)
                 open("session_expired.flag", "w").close()
             return None, "SESSION_EXPIRED"
@@ -118,11 +118,11 @@ def get_csrf_token(http_session):
         if not csrf_input:
             if not os.path.exists("session_expired.flag"):
                 msg = ("━━━━━━━━━━━━━━━━━━━━\n"
-                       "❌ <b>Session Expired</b>\n"
+                       "❌ <b>Session Habis</b>\n"
                        "━━━━━━━━━━━━━━━━━━━━\n\n"
-                       "Gagal mengambil CSRF token.\n"
-                       "ci_session sepertinya sudah kedaluwarsa.\n\n"
-                       "Silakan perbarui cookie di <code>.env</code>.")
+                       "Gagal masuk ke dashboard.\n"
+                       "Cookie ci_session sepertinya sudah expired.\n\n"
+                       "Ketik /session untuk ganti cookie baru.")
                 send_telegram_message(msg)
                 open("session_expired.flag", "w").close()
             return None, "SESSION_EXPIRED"
@@ -161,7 +161,7 @@ def fetch_jobs_from_datatables(http_session, endpoint_url, csrf_token):
         try:
             json_data = req.json()
         except:
-            log.info(f"    [x] Response bukan JSON valid dari {endpoint_url}")
+            log.info(f"Gagal membaca data dari server (format tidak valid)")
             return []
         
         data_rows = json_data.get('data', [])
@@ -195,11 +195,11 @@ def fetch_jobs_from_datatables(http_session, endpoint_url, csrf_token):
         return jobs
         
     except Exception as e:
-        log.info(f"    [x] Error saat query {endpoint_url}: {e}")
+        log.info(f"Koneksi ke server bermasalah: {e}")
         return []
 
 def run_bot(http_session):
-    log.info("Memulai pengecekan lowongan...")
+    log.info("Mulai cek lowongan baru...")
     applied_list = load_applied_jobs()
     
     # 1. Ambil CSRF token dari dashboard
@@ -207,39 +207,39 @@ def run_bot(http_session):
     
     if error:
         if error == "SESSION_EXPIRED":
-            log.info("[x] Bot dilempar ke halaman Login. Session kedaluwarsa!")
+            log.info("Session habis, bot berhenti. Ganti session via /session di Telegram.")
             time.sleep(10)
             return False  # Hentikan loop
         else:
-            log.info(f"[x] {error}. Akan mencoba lagi nanti.")
+            log.info(f"{error} — coba lagi nanti.")
             return True  # Coba lagi nanti
     
     # 2. Scrape semua kategori lowongan dari endpoint DataTables baru
     all_jobs = []  # List of (job_id, job_title, company, category_name, category_emoji)
     
     for ep in JOB_ENDPOINTS:
-        log.info(f"Mengambil data {ep['name']}...")
+        log.info(f"Melihat {ep['name']}...")
         jobs = fetch_jobs_from_datatables(http_session, ep['endpoint'], csrf_token)
-        log.info(f"  → {len(jobs)} lowongan ditemukan")
+        log.info(f"  Ada {len(jobs)} lowongan")
         
         for job_id, job_title, company in jobs:
             all_jobs.append((job_id, job_title, company, ep['name'], ep['emoji']))
     
     total = len(all_jobs)
-    log.info(f"Total: {total} lowongan dari semua kategori.")
+    log.info(f"Total {total} lowongan ditemukan.")
     
     if total == 0:
-        log.info("Tidak ada lowongan di halaman.")
+        log.info("Belum ada lowongan yang tersedia.")
         return True
 
     # 3. Jika applied_jobs masih kosong (bot baru pertama kali dijalankan),
     # simpan semua lowongan saat ini sebagai "Lowongan Lama" tanpa di-apply.
     # Bot hanya akan apply lowongan yang BENAR-BENAR BARU muncul setelahnya.
     if len(applied_list) == 0:
-        log.info("Inisialisasi awal — menyimpan semua lowongan saat ini sebagai 'Lowongan Lama'...")
+        log.info(f"Pertama kali jalan — menandai {total} lowongan yang sudah ada sebagai 'lama'.")
         for job_id, _, _, _, _ in all_jobs:
             save_applied_job(job_id)
-        log.info(f"  → {total} lowongan lama disimpan. Bot sekarang hanya menunggu lowongan baru.")
+        log.info("Selesai! Sekarang bot hanya akan melamar lowongan baru.")
         
         msg = ("━━━━━━━━━━━━━━━━━━━━\n"
                "📊 <b>Inisialisasi Selesai</b>\n"
@@ -262,9 +262,9 @@ def run_bot(http_session):
             continue
             
         new_count += 1
-        company_info = f" — {company}" if company else ""
-        log.info(f"LOWONGAN BARU [{category}]: {job_title}{company_info}")
-        log.info(f"  → Melamar...")
+        company_info = f" di {company}" if company else ""
+        log.info(f"Lowongan baru ditemukan: {job_title}{company_info}")
+        log.info(f"  Mencoba melamar...")
         apply_url = f"{BASE_URL}/apply/{job_id}"
         
         try:
@@ -287,7 +287,7 @@ def run_bot(http_session):
             
             if is_success or req_apply.url.endswith('/History_lamaran'):
                 success_count += 1
-                log.info(f"  ✅ Berhasil melamar: {job_title}")
+                log.info(f"  Berhasil melamar: {job_title} ✅")
                 save_applied_job(job_id)
                 
                 # Kirim notifikasi Telegram
@@ -303,7 +303,7 @@ def run_bot(http_session):
                 
             elif error_reason:
                 fail_count += 1
-                log.info(f"  ❌ Gagal: {error_reason}")
+                log.info(f"  Gagal melamar: {error_reason}")
                 # Tetap save ke applied_jobs agar tidak di-loop terus menerus
                 save_applied_job(job_id)
                 
@@ -320,7 +320,7 @@ def run_bot(http_session):
                 
             else:
                 fail_count += 1
-                log.info(f"  ❌ Gagal tanpa pesan jelas (HTTP {req_apply.status_code})")
+                log.info(f"  Gagal melamar (server tidak memberi alasan)")
                 # Save saja supaya tidak ngeloop terus menerus
                 save_applied_job(job_id)
                 
@@ -329,7 +329,7 @@ def run_bot(http_session):
             
         except Exception as e:
             fail_count += 1
-            log.info(f"  ❌ Error: {e}")
+            log.info(f"  Koneksi bermasalah saat melamar: {e}")
             msg = ("━━━━━━━━━━━━━━━━━━━━\n"
                    "⚠️ <b>Error Sistem</b>\n"
                    "━━━━━━━━━━━━━━━━━━━━\n\n"
@@ -338,9 +338,9 @@ def run_bot(http_session):
             send_telegram_message(msg)
     
     if new_count == 0:
-        log.info("Tidak ada lowongan baru.")
+        log.info("Semua lowongan sudah pernah dicek, belum ada yang baru.")
     else:
-        log.info(f"Selesai — {new_count} lowongan baru diproses ({success_count} berhasil, {fail_count} gagal)")
+        log.info(f"Selesai! {new_count} lowongan baru diproses — {success_count} berhasil, {fail_count} gagal.")
             
     return True
 
@@ -385,8 +385,8 @@ if __name__ == "__main__":
             
         status_ok = run_bot(global_session)
         if not status_ok:
-            log.info("Bot dihentikan karena session expired atau error kritikal.")
+            log.info("Bot berhenti. Ganti session via /session di Telegram.")
             break
             
-        log.info(f"Menunggu {INTERVAL_MENIT} menit sebelum cek lagi...")
+        log.info(f"Istirahat {INTERVAL_MENIT} menit, nanti cek lagi...")
         time.sleep(INTERVAL_MENIT * 60)
