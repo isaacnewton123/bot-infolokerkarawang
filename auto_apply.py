@@ -6,12 +6,13 @@ import os
 import sys
 import json
 import logging
+from logging.handlers import RotatingFileHandler
 import threading
 from dotenv import load_dotenv
 from telegram_notifier import send_telegram_message, start_command_listener
 
-# Muat variabel dari .env
-load_dotenv()
+# Muat variabel dari .env secara paksa (timpa yang ada di memory)
+load_dotenv(override=True)
 
 # ================= Kofigurasi ================= #
 COOKIE = {'ci_session': os.getenv('CI_SESSION')}
@@ -53,8 +54,8 @@ def setup_logging():
     ch.setFormatter(formatter)
     logger.addHandler(ch)
     
-    # File handler (untuk /log command di Telegram)
-    fh = logging.FileHandler(LOG_FILE, encoding='utf-8')
+    # File handler (untuk /log command di Telegram, max 1MB, simpan 3 backup)
+    fh = RotatingFileHandler(LOG_FILE, maxBytes=1024*1024, backupCount=3, encoding='utf-8')
     fh.setFormatter(formatter)
     logger.addHandler(fh)
     
@@ -350,19 +351,45 @@ if __name__ == "__main__":
     log.info("Platform: Termux | Kategori: Umum + Magang")
     log.info("=" * 50)
     
-    startup_msg = ("━━━━━━━━━━━━━━━━━━━━\n"
-                   "🤖 <b>Bot Aktif!</b>\n"
-                   "━━━━━━━━━━━━━━━━━━━━\n\n"
-                   "Bot Auto-Apply InfoLoker Karawang\n"
-                   "sedang berjalan dan siap memantau\n"
-                   "lowongan pekerjaan baru.\n\n"
-                   "<b>Kategori yang dipantau:</b>\n"
-                   "• 💼 Lowongan Umum\n"
-                   "• 🎓 Magang\n\n"
-                   "<b>Platform:</b> Termux\n"
-                   "<b>Interval:</b> Setiap 5 menit\n\n"
-                   "<i>Ketik /help untuk daftar perintah.</i>")
-    send_telegram_message(startup_msg)
+    # Cek apakah bot baru saja di-restart secara sengaja
+    if '--restarted_update' in sys.argv:
+        msg = ("━━━━━━━━━━━━━━━━━━━━\n"
+               "✅ <b>Restart Sukses!</b>\n"
+               "━━━━━━━━━━━━━━━━━━━━\n\n"
+               "Bot berhasil nyala kembali dengan\n"
+               "kode versi terbaru! 🚀\n\n"
+               "<i>Bot kembali bekerja secara normal.</i>")
+        send_telegram_message(msg)
+    elif '--restarted_session' in sys.argv:
+        msg = ("━━━━━━━━━━━━━━━━━━━━\n"
+               "✅ <b>Restart Sukses!</b>\n"
+               "━━━━━━━━━━━━━━━━━━━━\n\n"
+               "Bot berhasil nyala kembali dengan\n"
+               "cookie ci_session yang baru! 🍪\n\n"
+               "<i>Bot kembali bekerja secara normal.</i>")
+        send_telegram_message(msg)
+    elif '--restarted_manual' in sys.argv:
+        msg = ("━━━━━━━━━━━━━━━━━━━━\n"
+               "✅ <b>Restart Sukses!</b>\n"
+               "━━━━━━━━━━━━━━━━━━━━\n\n"
+               "Bot berhasil di-restart manual. 🔁\n\n"
+               "<i>Bot kembali bekerja secara normal.</i>")
+        send_telegram_message(msg)
+    else:
+        # Pesan startup normal saat bot pertama kali dijalankan
+        startup_msg = ("━━━━━━━━━━━━━━━━━━━━\n"
+                       "🤖 <b>Bot Aktif!</b>\n"
+                       "━━━━━━━━━━━━━━━━━━━━\n\n"
+                       "Bot Auto-Apply InfoLoker Karawang\n"
+                       "sedang berjalan dan siap memantau\n"
+                       "lowongan pekerjaan baru.\n\n"
+                       "<b>Kategori yang dipantau:</b>\n"
+                       "• 💼 Lowongan Umum\n"
+                       "• 🎓 Magang\n\n"
+                       "<b>Platform:</b> Termux / VPS\n"
+                       "<b>Interval:</b> Setiap 5 menit\n\n"
+                       "<i>Ketik /help untuk daftar perintah.</i>")
+        send_telegram_message(startup_msg)
     
     INTERVAL_MENIT = 5
     

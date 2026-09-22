@@ -6,8 +6,8 @@ import subprocess
 import sys
 from dotenv import load_dotenv
 
-# Muat variabel dari .env
-load_dotenv()
+# Muat variabel dari .env secara paksa (timpa yang ada di memory)
+load_dotenv(override=True)
 
 # Konfigurasi Telegram dari .env
 BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
@@ -239,10 +239,10 @@ def start_command_listener():
                     # Beri tahu Telegram bahwa pesan sudah diproses agar tidak dikirim ulang saat restart
                     get_telegram_updates(offset)
                     
-                    # Restart bot dengan session baru
+                    # Restart bot dengan session baru (kirim argumen penanda)
                     python = sys.executable
                     script = os.path.join(SCRIPT_DIR, 'auto_apply.py')
-                    os.execv(python, [python, script])
+                    os.execv(python, [python, script, '--restarted_session'])
                 else:
                     msg = ("━━━━━━━━━━━━━━━━━━━━\n"
                            "❌ <b>Gagal Update</b>\n"
@@ -362,11 +362,10 @@ def start_command_listener():
                 # Beri tahu Telegram bahwa pesan sudah diproses
                 get_telegram_updates(offset)
                 
-                # Restart dengan os.execv — replace process saat ini
-                # dengan proses baru tanpa exit loop
+                # Restart dengan os.execv (kirim argumen penanda)
                 python = sys.executable
                 script = os.path.join(SCRIPT_DIR, 'auto_apply.py')
-                os.execv(python, [python, script])
+                os.execv(python, [python, script, '--restarted_manual'])
                 
             elif text == "/update":
                 msg = ("━━━━━━━━━━━━━━━━━━━━\n"
@@ -375,30 +374,50 @@ def start_command_listener():
                        "Sedang menarik update dari GitHub...")
                 send_telegram_message(msg)
                 try:
-                    result = subprocess.run(["git", "pull", "origin", "main"], capture_output=True, text=True, cwd=SCRIPT_DIR)
+                    # 1. Paksa update dengan hard reset agar semua file lokal hancur & ikut GitHub 100%
+                    subprocess.run(["git", "fetch", "origin", "main"], capture_output=True, cwd=SCRIPT_DIR)
+                    result = subprocess.run(["git", "reset", "--hard", "origin/main"], capture_output=True, text=True, stderr=subprocess.STDOUT, cwd=SCRIPT_DIR)
                     out = result.stdout.strip()
-                    if "Already up to date" in out or "up-to-date" in out:
-                        msg = ("━━━━━━━━━━━━━━━━━━━━\n"
-                               "✅ <b>Sudah Terbaru</b>\n"
-                               "━━━━━━━━━━━━━━━━━━━━\n\n"
-                               "Kode bot sudah versi paling baru.\n"
-                               "Tidak ada perubahan.")
-                        send_telegram_message(msg, reply_markup=main_keyboard)
+                    
+                    if "is up to date" in out or "Already up to date" in out or "up-to-date" in out or result.returncode == 0:
+                        # Cek apakah file auto_apply.py dan telegram_notifier.py valid sintaksnya
+                        check_syntax_auto = subprocess.run([sys.executable, "-m", "py_compile", "auto_apply.py"], cwd=SCRIPT_DIR, capture_output=True)
+                        check_syntax_tele = subprocess.run([sys.executable, "-m", "py_compile", "telegram_notifier.py"], cwd=SCRIPT_DIR, capture_output=True)
+                        
+                        if check_syntax_auto.returncode != 0 or check_syntax_tele.returncode != 0:
+                            # Batalkan update jika error sintaks!
+                            subprocess.run(["git", "reset", "--hard", "HEAD@{1}"], cwd=SCRIPT_DIR)
+                            msg = ("━━━━━━━━━━━━━━━━━━━━\n"
+                                   "❌ <b>Update Dibatalkan!</b>\n"
+                                   "━━━━━━━━━━━━━━━━━━━━\n\n"
+                                   "Kode di GitHub mengandung Error/Cacat.\n"
+                                   "Demi keselamatan, bot otomatis\n"
+                                   "kembali menggunakan kode lama\n"
+                                   "dan menolak untuk restart.")
+                            send_telegram_message(msg, reply_markup=main_keyboard)
+                        else:
+                            msg = ("━━━━━━━━━━━━━━━━━━━━\n"
+                                   "✅ <b>Kode Diperbarui!</b>\n"
+                                   "━━━━━━━━━━━━━━━━━━━━\n\n"
+                                   "Kode berhasil ditarik paksa dari GitHub.\n"
+                                   "Bot akan restart sekarang. Jika sukses,\n"
+                                   "Anda akan menerima pesan notifikasi lagi.")
+                            send_telegram_message(msg, reply_markup=main_keyboard)
+                            time.sleep(1)
+                            
+                            # Beri tahu Telegram bahwa pesan sudah diproses
+                            get_telegram_updates(offset)
+                            
+                            python = sys.executable
+                            script = os.path.join(SCRIPT_DIR, 'auto_apply.py')
+                            os.execv(python, [python, script, '--restarted_update'])
                     else:
                         msg = ("━━━━━━━━━━━━━━━━━━━━\n"
-                               "✅ <b>Update Berhasil!</b>\n"
+                               "❌ <b>Git Error!</b>\n"
                                "━━━━━━━━━━━━━━━━━━━━\n\n"
-                               "Kode terbaru berhasil ditarik.\n"
-                               "Bot akan restart sekarang...")
+                               f"<pre>{out[:500]}</pre>")
                         send_telegram_message(msg, reply_markup=main_keyboard)
-                        time.sleep(1)
                         
-                        # Beri tahu Telegram bahwa pesan sudah diproses
-                        get_telegram_updates(offset)
-                        
-                        python = sys.executable
-                        script = os.path.join(SCRIPT_DIR, 'auto_apply.py')
-                        os.execv(python, [python, script])
                 except Exception as e:
                     send_telegram_message(f"❌ Gagal update: {e}", reply_markup=main_keyboard)
             else:
