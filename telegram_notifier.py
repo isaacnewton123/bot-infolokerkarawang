@@ -134,44 +134,76 @@ def _format_log_human(raw_lines):
     """
     Konversi log mentah ke format yang lebih enak dibaca manusia.
     """
-    formatted = []
-    for line in raw_lines:
+    # Logika Log Matang (Smart Summary)
+    # 1. Cari baris "Mulai cek lowongan baru..." terakhir (sebagai awal siklus)
+    cycle_lines = []
+    for line in reversed(raw_lines):
         line = line.strip()
         if not line:
             continue
+        cycle_lines.insert(0, line)
+        if "Mulai cek lowongan baru..." in line:
+            break
+            
+    if not cycle_lines:
+        return "Belum ada aktivitas di log."
         
-        # Hapus timestamp prefix [2026-09-22 21:29:47] 
+    # Ekstrak waktu mulai siklus
+    waktu_cek = "Tidak diketahui"
+    m = re.search(r'^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]', cycle_lines[0])
+    if m:
+        waktu_cek = m.group(1)
+        
+    berhasil = []
+    gagal = []
+    total_lowongan = "0"
+    status_istirahat = False
+    
+    for line in cycle_lines:
         clean = re.sub(r'^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\]\s*', '', line)
         
-        # Skip baris separator atau baris kosong
-        if clean.startswith('===') or clean.startswith('---') or not clean:
-            continue
-        
-        # Beri emoji berdasarkan isi
-        if 'Berhasil melamar' in clean or '✅' in clean:
-            formatted.append(f"✅ {clean}")
-        elif 'Gagal' in clean or '❌' in clean:
-            formatted.append(f"❌ {clean}")
-        elif 'Memulai pengecekan' in clean:
-            formatted.append(f"🔍 {clean}")
-        elif 'lowongan ditemukan' in clean or 'Total:' in clean:
-            formatted.append(f"📋 {clean}")
-        elif 'Menunggu' in clean:
-            formatted.append(f"⏳ {clean}")
-        elif 'LOWONGAN BARU' in clean:
-            formatted.append(f"🆕 {clean}")
-        elif 'Melamar' in clean:
-            formatted.append(f"📨 {clean}")
-        elif 'Inisialisasi' in clean:
-            formatted.append(f"⚙️ {clean}")
-        elif 'Bot dihentikan' in clean or 'session expired' in clean.lower():
-            formatted.append(f"🛑 {clean}")
-        elif 'BOT AUTO-APPLY' in clean or 'Platform' in clean:
-            formatted.append(f"🤖 {clean}")
-        else:
-            formatted.append(f"  {clean}")
+        if "Berhasil melamar" in clean or "✅" in clean:
+            berhasil.append(clean)
+        elif "Gagal melamar" in clean or "❌" in clean:
+            gagal.append(clean)
+        elif "Total" in clean and "ditemukan" in clean:
+            total_lowongan = clean
+        elif "Istirahat" in clean or "Menunggu" in clean:
+            status_istirahat = True
+            
+    # Buat format matang
+    hasil_teks = []
+    hasil_teks.append("━━━━━━━━━━━━━━━━━━━━")
+    hasil_teks.append("📋 <b>LAPORAN TERAKHIR</b>")
+    hasil_teks.append("━━━━━━━━━━━━━━━━━━━━\n")
     
-    return '\n'.join(formatted) if formatted else "Belum ada aktivitas."
+    hasil_teks.append(f"🕒 <b>Waktu Cek:</b> {waktu_cek}")
+    
+    if len(berhasil) == 0 and len(gagal) == 0:
+        hasil_teks.append(f"ℹ️ <b>Hasil:</b> Tidak ada lowongan baru.\n({total_lowongan})\n")
+    else:
+        hasil_teks.append(f"ℹ️ <b>Hasil:</b> {len(berhasil)} berhasil, {len(gagal)} gagal.\n")
+        
+    hasil_teks.append(f"✅ <b>Berhasil ({len(berhasil)}):</b>")
+    if berhasil:
+        for b in berhasil:
+            hasil_teks.append(f"- {b}")
+    else:
+        hasil_teks.append("- Tidak ada")
+        
+    hasil_teks.append(f"\n❌ <b>Gagal ({len(gagal)}):</b>")
+    if gagal:
+        for g in gagal:
+            hasil_teks.append(f"- {g}")
+    else:
+        hasil_teks.append("- Tidak ada")
+        
+    if status_istirahat:
+        hasil_teks.append("\n⏳ <b>Status Bot:</b> Sedang istirahat, menunggu jadwal cek berikutnya.")
+    else:
+        hasil_teks.append("\n🔄 <b>Status Bot:</b> Sedang bekerja melakukan pengecekan...")
+        
+    return '\n'.join(hasil_teks)
 
 # State: menunggu input ci_session dari user
 _waiting_session = {}
@@ -257,13 +289,15 @@ def start_command_listener():
                        "📖 <b>Daftar Perintah</b>\n"
                        "━━━━━━━━━━━━━━━━━━━━\n\n"
                        "📊 /status — Cek kondisi bot\n"
-                       "📋 /log — Lihat aktivitas terbaru\n"
+                       "📋 /log — Lihat laporan matang terakhir\n"
+                       "⚡ /cek — Paksa bot melamar sekarang\n"
                        "🔑 /session — Ganti cookie ci_session\n"
-                       "⏸ /stop — Jeda pencarian loker\n"
-                       "▶️ /start — Lanjutkan pencarian\n"
-                       "🔄 /update — Tarik update dari GitHub\n"
+                       "🔄 /update — Tarik pembaruan GitHub\n"
+                       "🗑️ /reset_memori — Hapus ingatan lowongan\n"
+                       "⏸ /stop — Jeda pencarian\n"
+                       "▶️ /start — Lanjut pencarian\n"
                        "🔁 /restart — Restart bot\n\n"
-                       "<i>Gunakan tombol di bawah untuk akses cepat.</i>")
+                       "<i>Gunakan menu atau ketik langsung.</i>")
                 send_telegram_message(msg, reply_markup=main_keyboard)
                 
             elif text == "/status":
@@ -296,14 +330,15 @@ def start_command_listener():
                         with open(LOG_FILE, 'r') as f:
                             lines = f.readlines()
                         
-                        last_lines = lines[-20:] if len(lines) > 20 else lines
+                        # Ambil maksimal 500 baris terakhir untuk mencari siklus terakhir
+                        last_lines = lines[-500:] if len(lines) > 500 else lines
                         human_log = _format_log_human(last_lines)
                         
                         if len(human_log) > 3500:
                             human_log = human_log[-3500:]
                         
                         msg = ("━━━━━━━━━━━━━━━━━━━━\n"
-                               "📋 <b>Aktivitas Terakhir</b>\n"
+                               "📋 <b>LAPORAN TERAKHIR</b>\n"
                                "━━━━━━━━━━━━━━━━━━━━\n\n"
                                f"{human_log}")
                         send_telegram_message(msg, reply_markup=main_keyboard)
@@ -311,11 +346,36 @@ def start_command_listener():
                         msg = ("━━━━━━━━━━━━━━━━━━━━\n"
                                "📋 <b>Aktivitas</b>\n"
                                "━━━━━━━━━━━━━━━━━━━━\n\n"
-                               "Belum ada aktivitas.\n"
+                               "Belum ada file log.\n"
                                "Bot mungkin baru saja dijalankan.")
                         send_telegram_message(msg, reply_markup=main_keyboard)
                 except Exception as e:
                     send_telegram_message(f"❌ Gagal membaca log: {e}", reply_markup=main_keyboard)
+                    
+            elif text == "/cek":
+                if os.path.exists("stop.flag"):
+                    send_telegram_message("❌ <b>Bot sedang dijeda.</b>\nKetik /start dulu untuk mengaktifkan bot.", reply_markup=main_keyboard)
+                else:
+                    with open("force_check.flag", "w") as f:
+                        f.write("1")
+                    send_telegram_message("⚡ <b>Perintah Diterima!</b>\n\nBot akan segera mengabaikan waktu istirahat dan mengecek lowongan baru sekarang juga.", reply_markup=main_keyboard)
+                    
+            elif text == "/reset_memori":
+                msg = ("⚠️ <b>PERINGATAN!</b> ⚠️\n\n"
+                       "Anda akan menghapus seluruh ingatan bot tentang lowongan yang sudah pernah dicek/dilamar.\n\n"
+                       "Jika dihapus, bot akan menganggap <b>semua lowongan di web saat ini adalah lowongan lama</b>, dan dia akan mulai mencari lowongan baru dari nol.\n\n"
+                       "Apakah Anda yakin? Jika ya, ketik (atau salin teks ini):\n"
+                       "<code>/KONFIRMASI_RESET</code>")
+                send_telegram_message(msg, reply_markup=main_keyboard)
+                
+            elif text == "/KONFIRMASI_RESET":
+                applied_file = os.path.join(SCRIPT_DIR, 'applied_jobs.json')
+                try:
+                    with open(applied_file, 'w') as f:
+                        f.write("[]")
+                    send_telegram_message("✅ <b>Memori Berhasil Dihapus!</b>\n\nDatabase ingatan bot kini kosong (0 lowongan). Bot akan menganggap semua data di web saat ini sebagai data lawas.", reply_markup=main_keyboard)
+                except Exception as e:
+                    send_telegram_message(f"❌ Gagal mereset memori: {e}", reply_markup=main_keyboard)
                     
             elif text == "/session":
                 _waiting_session[chat_id_from] = True

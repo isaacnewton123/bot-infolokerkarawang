@@ -416,4 +416,12 @@ if __name__ == "__main__":
             break
             
         log.info(f"Istirahat {INTERVAL_MENIT} menit, nanti cek lagi...")
-        time.sleep(INTERVAL_MENIT * 60)
+        for _ in range(INTERVAL_MENIT * 60):
+            if os.path.exists("force_check.flag"):
+                try:
+                    os.remove("force_check.flag")
+                except:
+                    pass
+                log.info("Memaksa pengecekan sekarang (diperintah via Telegram)...")
+                break
+            time.sleep(1)
