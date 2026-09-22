@@ -236,6 +236,9 @@ def start_command_listener():
                     send_telegram_message(msg, reply_markup=main_keyboard)
                     time.sleep(1)
                     
+                    # Beri tahu Telegram bahwa pesan sudah diproses agar tidak dikirim ulang saat restart
+                    get_telegram_updates(offset)
+                    
                     # Restart bot dengan session baru
                     python = sys.executable
                     script = os.path.join(SCRIPT_DIR, 'auto_apply.py')
@@ -356,6 +359,9 @@ def start_command_listener():
                 send_telegram_message(msg, reply_markup=main_keyboard)
                 time.sleep(1)
                 
+                # Beri tahu Telegram bahwa pesan sudah diproses
+                get_telegram_updates(offset)
+                
                 # Restart dengan os.execv — replace process saat ini
                 # dengan proses baru tanpa exit loop
                 python = sys.executable
@@ -369,9 +375,9 @@ def start_command_listener():
                        "Sedang menarik update dari GitHub...")
                 send_telegram_message(msg)
                 try:
-                    result = subprocess.run(["git", "pull"], capture_output=True, text=True, cwd=SCRIPT_DIR)
+                    result = subprocess.run(["git", "pull", "origin", "main"], capture_output=True, text=True, cwd=SCRIPT_DIR)
                     out = result.stdout.strip()
-                    if "Already up to date" in out:
+                    if "Already up to date" in out or "up-to-date" in out:
                         msg = ("━━━━━━━━━━━━━━━━━━━━\n"
                                "✅ <b>Sudah Terbaru</b>\n"
                                "━━━━━━━━━━━━━━━━━━━━\n\n"
@@ -386,6 +392,10 @@ def start_command_listener():
                                "Bot akan restart sekarang...")
                         send_telegram_message(msg, reply_markup=main_keyboard)
                         time.sleep(1)
+                        
+                        # Beri tahu Telegram bahwa pesan sudah diproses
+                        get_telegram_updates(offset)
+                        
                         python = sys.executable
                         script = os.path.join(SCRIPT_DIR, 'auto_apply.py')
                         os.execv(python, [python, script])
